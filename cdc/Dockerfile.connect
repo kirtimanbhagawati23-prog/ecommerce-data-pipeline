@@ -1,0 +1,28 @@
+FROM debezium/connect:2.6
+
+USER root
+
+RUN microdnf install -y wget unzip && \
+    microdnf clean all
+
+RUN mkdir -p /kafka/connect/snowflake
+
+COPY snowflake-kafka-connector-4.0.0.jar \
+     /kafka/connect/snowflake/
+
+COPY bcprov-jdk18on-1.84.jar \
+     /kafka/connect/snowflake/
+
+COPY bcpkix-jdk18on-1.84.jar \
+     /kafka/connect/snowflake/
+
+COPY bcutil-jdk18on-1.84.jar \
+     /kafka/connect/snowflake/
+
+COPY bc-fips-2.1.0.jar \
+     /kafka/connect/snowflake/
+
+COPY bcpkix-fips-2.1.8.jar \
+     /kafka/connect/snowflake/
+
+USER kafka

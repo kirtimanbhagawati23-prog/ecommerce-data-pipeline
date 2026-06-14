@@ -1,0 +1,29 @@
+{
+  "name": "snowflake-sink",
+  "config": {
+    "connector.class": "com.snowflake.kafka.connector.SnowflakeStreamingSinkConnector",
+
+    "tasks.max": "1",
+
+    "topics": "ecommerce.public.customers,ecommerce.public.addresses,ecommerce.public.products,ecommerce.public.inventory,ecommerce.public.orders,ecommerce.public.order_items,ecommerce.public.payments,ecommerce.public.customer_events",
+
+    "snowflake.url.name": "we78615.ap-southeast-7.aws.snowflakecomputing.com",
+    "snowflake.user.name": "KAFKA_CONNECT",
+    "snowflake.private.key": "",
+    "snowflake.database.name": "ECOMMERCE_DW",
+    "snowflake.schema.name": "RAW_CDC",
+    "snowflake.role.name": "KAFKA_CONNECT_ROLE",
+
+    "buffer.count.records": "1000",
+    "buffer.flush.time": "10",
+
+    "snowflake.streaming.validate.compatibility.with.classic": "false",
+    "snowflake.enable.schematization": "true",
+
+    "transforms": "route",
+    "transforms.route.type": "org.apache.kafka.connect.transforms.RegexRouter",
+    "transforms.route.regex": "ecommerce\\.public\\.(.*)",
+    "transforms.route.replacement": "$1"
+
+  }
+}

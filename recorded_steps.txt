@@ -1,0 +1,765 @@
+                           CDC PIPELINE
+
+        Postgres                MySQL               MongoDB
+            |                     |                    |
+            +---------------------+--------------------+
+                                  |
+                               Debezium
+                                  |
+                              Snowflake
+                              Raw Layer
+                                  |
+                          Snowflake Tasks
+                                  |
+                        Structured CDC Layer
+                                  |
+                                  |
+                                  v
+
+
+                        BATCH PIPELINE
+
+         CSV Files            APIs             S3 Data
+              |                |                  |
+              +----------------+------------------+
+                               |
+                            Airflow
+                               |
+                         PySpark Jobs
+                               |
+                         Cleaned Layer
+                               |
+                               |
+                               v
+
+
+                    CENTRAL ANALYTICS LAYER
+
+                    Structured CDC Layer
+                               +
+                       Cleaned Batch Layer
+                               |
+                               v
+                             dbt
+                               |
+                     Staging Models
+                               |
+                     Intermediate Models
+                               |
+                       Fact/Dimension
+                               |
+                        Business Marts
+                               |
+                          Dashboards
+
+
+Source(postgres)
+customers
+addresses —
+products
+inventory
+orders
+order_items —
+payments —
+customer_events
+
+CREATE TABLE customers (
+    customer_id BIGSERIAL PRIMARY KEY,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    email VARCHAR(255) UNIQUE,
+    phone VARCHAR(20),
+    signup_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    customer_status VARCHAR(20) DEFAULT 'ACTIVE'
+);
+
+INSERT INTO customers
+(first_name,last_name,email,phone,signup_date)
+VALUES
+('John','Doe','john.doe@email.com','555-1001','2025-01-15'),
+('Jane','Smith','jane.smith@email.com','555-1002','2025-01-20'),
+('Mike','Johnson','mike.j@email.com','555-1003','2025-02-05'),
+('Sarah','Brown','sarah.b@email.com','555-1004','2025-02-11'),
+('David','Wilson','david.w@email.com','555-1005','2025-03-01');
+
+CREATE TABLE addresses (
+    address_id BIGSERIAL PRIMARY KEY,
+    customer_id BIGINT REFERENCES customers(customer_id),
+    address_line1 VARCHAR(255),
+    city VARCHAR(100),
+    state VARCHAR(100),
+    country VARCHAR(100),
+    postal_code VARCHAR(20),
+    is_primary BOOLEAN DEFAULT TRUE,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO addresses
+(customer_id,address_line1,city,state,country,postal_code)
+VALUES
+(1,'12 Main Street','New York','NY','USA','10001'),
+(2,'45 Lake View','Chicago','IL','USA','60601'),
+(3,'90 Green Road','Austin','TX','USA','73301'),
+(4,'11 Ocean Ave','Miami','FL','USA','33101'),
+(5,'99 Hill Street','Seattle','WA','USA','98101');
+
+
+CREATE TABLE products (
+    product_id BIGSERIAL PRIMARY KEY,
+    product_name VARCHAR(255),
+    category VARCHAR(100),
+    brand VARCHAR(100),
+    unit_price NUMERIC(10,2),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO products
+(product_name,category,brand,unit_price)
+VALUES
+('iPhone 15','Electronics','Apple',899.99),
+('Galaxy S25','Electronics','Samsung',799.99),
+('MacBook Air','Computers','Apple',1299.99),
+('ThinkPad X1','Computers','Lenovo',1399.99),
+('Sony Headphones','Accessories','Sony',199.99),
+('Apple Watch','Wearables','Apple',399.99);
+
+
+CREATE TABLE inventory (
+    product_id BIGINT PRIMARY KEY REFERENCES products(product_id),
+    available_quantity INT,
+    reorder_threshold INT,
+    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO inventory
+VALUES
+(1,100,20,CURRENT_TIMESTAMP),
+(2,75,20,CURRENT_TIMESTAMP),
+(3,50,10,CURRENT_TIMESTAMP),
+(4,40,10,CURRENT_TIMESTAMP),
+(5,200,30,CURRENT_TIMESTAMP),
+(6,120,25,CURRENT_TIMESTAMP);
+
+CREATE TABLE orders (
+    order_id BIGSERIAL PRIMARY KEY,
+    customer_id BIGINT REFERENCES customers(customer_id),
+    order_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    order_status VARCHAR(30),
+    order_total NUMERIC(12,2)
+);
+
+CREATE TABLE order_items (
+    order_item_id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT REFERENCES orders(order_id),
+    product_id BIGINT REFERENCES products(product_id),
+    quantity INT,
+    unit_price NUMERIC(10,2),
+    line_total NUMERIC(12,2)
+);
+
+CREATE TABLE payments (
+    payment_id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT REFERENCES orders(order_id),
+    payment_method VARCHAR(50),
+    payment_status VARCHAR(20),
+    payment_amount NUMERIC(12,2),
+    payment_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT INTO orders
+(
+    customer_id,
+    order_timestamp,
+    order_status,
+    order_total
+)
+SELECT
+    floor(random()*5 + 1)::int,
+    NOW() - (random() * interval '180 days'),
+    (
+        ARRAY[
+            'PENDING',
+            'SHIPPED',
+            'DELIVERED',
+            'CANCELLED'
+        ]
+    )[floor(random()*4 + 1)],
+    round((random()*3000 + 50)::numeric,2)
+FROM generate_series(1,1000);
+
+INSERT INTO order_items
+(
+    order_id,
+    product_id,
+    quantity,
+    unit_price,
+    line_total
+)
+SELECT
+    o.order_id,
+    floor(random()*6 + 1)::int,
+    floor(random()*5 + 1)::int,
+    round((random()*1000 + 50)::numeric,2),
+    round((random()*5000 + 50)::numeric,2)
+FROM orders o;
+
+
+INSERT INTO payments
+(
+    order_id,
+    payment_method,
+    payment_status,
+    payment_amount
+)
+SELECT
+    order_id,
+    (
+        ARRAY[
+            'CARD',
+            'PAYPAL',
+            'UPI'
+        ]
+    )[floor(random()*3 + 1)],
+    'SUCCESS',
+    order_total
+FROM orders;
+
+CREATE TABLE customer_events (
+    event_id BIGSERIAL PRIMARY KEY,
+    customer_id BIGINT REFERENCES customers(customer_id),
+    event_type VARCHAR(50),
+    product_id BIGINT REFERENCES products(product_id),
+    session_id VARCHAR(100),
+    event_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    device_type VARCHAR(50),
+    source_channel VARCHAR(50)
+);
+
+INSERT INTO customer_events
+(
+    customer_id,
+    event_type,
+    product_id,
+    session_id,
+    event_timestamp,
+    device_type,
+    source_channel
+)
+VALUES
+(1,'LOGIN',NULL,'sess_1001','2026-01-01 09:00:00','Mobile','Organic'),
+(1,'PRODUCT_VIEW',1,'sess_1001','2026-01-01 09:02:00','Mobile','Organic'),
+(1,'ADD_TO_CART',1,'sess_1001','2026-01-01 09:05:00','Mobile','Organic'),
+(1,'PURCHASE',1,'sess_1001','2026-01-01 09:10:00','Mobile','Organic'),
+(2,'LOGIN',NULL,'sess_1002','2026-01-02 11:00:00','Desktop','Google Ads'),
+(2,'PRODUCT_VIEW',2,'sess_1002','2026-01-02 11:05:00','Desktop','Google Ads'),
+(3,'LOGIN',NULL,'sess_1003','2026-01-03 15:00:00','Mobile','Facebook'),
+(3,'PRODUCT_VIEW',3,'sess_1003','2026-01-03 15:02:00','Mobile','Facebook'),
+(3,'ADD_TO_CART',3,'sess_1003','2026-01-03 15:04:00','Mobile','Facebook');
+
+INSERT INTO customer_events
+(
+    customer_id,
+    event_type,
+    product_id,
+    session_id,
+    event_timestamp,
+    device_type,
+    source_channel
+)
+SELECT
+    floor(random()*5 + 1)::int,
+    (
+        ARRAY[
+            'PAGE_VIEW',
+            'PRODUCT_VIEW',
+            'ADD_TO_CART',
+            'REMOVE_FROM_CART',
+            'CHECKOUT_STARTED',
+            'PURCHASE',
+            'LOGIN',
+            'LOGOUT'
+        ]
+    )[floor(random()*8 + 1)],
+    floor(random()*6 + 1)::int,
+    md5(random()::text),
+    NOW() - (random() * interval '180 days'),
+    (
+        ARRAY[
+            'Mobile',
+            'Desktop',
+            'Tablet'
+        ]
+    )[floor(random()*3 + 1)],
+    (
+        ARRAY[
+            'Organic',
+            'Google Ads',
+            'Facebook',
+            'Email',
+            'Referral'
+        ]
+    )[floor(random()*5 + 1)]
+FROM generate_series(1,100000);
+
+CREATE INDEX idx_orders_customer
+ON orders(customer_id);
+
+CREATE INDEX idx_orders_timestamp
+ON orders(order_timestamp);
+
+CREATE INDEX idx_customer_events_customer
+ON customer_events(customer_id);
+
+CREATE INDEX idx_customer_events_session
+ON customer_events(session_id);
+
+CREATE INDEX idx_customer_events_timestamp
+ON customer_events(event_timestamp);
+
+CREATE INDEX idx_order_items_order
+ON order_items(order_id);
+
+CREATE INDEX idx_order_items_product
+ON order_items(product_id);
+
+
+
+
+CDC(Debezium)
+SHOW wal_level;
+SHOW max_replication_slots;
+SHOW max_wal_senders;
+
+SHOW config_file;
+
+CREATE ROLE debezium
+WITH LOGIN
+REPLICATION
+PASSWORD 'debezium';
+
+SELECT rolname, rolreplication
+FROM pg_roles
+WHERE rolname='debezium';
+
+GRANT USAGE ON SCHEMA public TO debezium;
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO debezium;
+
+ALTER DEFAULT PRIVILEGES IN SCHEMA public
+GRANT SELECT ON TABLES TO debezium;
+
+CREATE PUBLICATION ecommerce_publication
+FOR TABLE
+customers,
+addresses,
+products,
+inventory,
+orders,
+order_items,
+payments,
+customer_events;
+
+SELECT pubname
+FROM pg_publication;
+
+SELECT *
+FROM pg_publication_tables;
+
+SELECT *
+FROM pg_replication_slots;
+
+docker compose -f docker-compose.yml stop connect
+docker compose -f docker-compose.yml start connectdocker compose -f ./docker-compose.yml up -d #-d starts it in the backgrounddocker pull debezium/connect:2.6
+docker compose ps
+docker compose logs
+docker logs ecommerce-cdc-connect-1
+--register the connector filecurl -X POST \
+http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d @connector.json
+
+---check connector
+curl http://localhost:8083/connectors
+curl http://localhost:8083/connectors/ecommerce-postgres/status
+
+
+-----check topics
+docker exec -it ecommerce-cdc-kafka-1 bash
+----inside run
+kafka-topics.sh \
+--bootstrap-server localhost:9092 \
+--list
+
+docker exec -it ecommerce-cdc-connect-1 bash
+[kafka@9f2e4d387d98 ~]$ ls /kafka/connect
+
+----create a custom image
+docker build -t debezium-connect-snowflake:2.6 -f Dockerfile.connect .
+
+------register sink connector
+curl -X PUT \
+  http://localhost:8083/connectors/snowflake-sink/config \
+  -H "Content-Type: application/json" \
+  -d @snowflake-sink-v2.json
+
+---if connector deleted use this
+curl -X POST \
+  http://localhost:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d @snowflake-sink-v2.json
+
+-----status of connector
+curl localhost:8083/connectors/snowflake-sink/status
+
+----delete connector
+curl -X DELETE \
+http://localhost:8083/connectors/snowflake-sink
+
+
+----check topics created
+docker exec -it ecommerce-cdc-kafka-1 bash
+[kafka@77ef515dd830 ~]$ kafka-topics.sh \
+  --bootstrap-server kafka:9092 \
+  --list
+__consumer_offsets
+connect_configs
+connect_offsets
+connect_statuses
+ecommerce.public.customers
+
+
+-----check messages
+kafka-console-consumer.sh \
+  --bootstrap-server kafka:9092 \
+  --topic ecommerce.public.customers \
+  --from-beginning \
+  --max-messages 5
+
+
+docker compose -f docker-compose.yml logs airflow 
+docker compose -f docker-compose.yml run --rm airflow airflow db migrate
+docker compose -f docker-compose.yml down
+docker compose -f docker-compose.yml pull airflow
+docker compose -f docker-compose.yml up -dcurl -v http://127.0.0.1:8080
+
+
+
+Postgres
+"database.user": "debezium",
+"database.password": "debezium",
+
+Snowflake
+"snowflake.url.name": "we78615.ap-southeast-7.aws.snowflakecomputing.com"username : kirtimanb23
+password: DanDangerous12!@
+
+"snowflake.user.name": "KAFKA_CONNECT",
+"snowflake.private.key": "-----BEGIN PRIVATE KEY-----\nMIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQC615CVGtRstIBN\n1bNOD36BVY6QtMgwDfJQSQHFBwuF6dMPbKZYIOjZvJHVA/1TwEMN0sHBrdmTpdji\nHcEahhZPd0iVblFxEns83tsLleOtSTKEztBAbN1dCQfZ6eF+9+JpHcMwrVYMYU1g\n2BS3Jn4bDH5p259uz0wvII/4hUOf6xJEvVYY/7U9HwapoKP8nRHrPzX6m/40QGPI\nnVSnUpPSvLNg/RFa0h6JM4BnNWuYXrJU++esE8/xEuZk6ythPySD4rPCK+ufk6wL\njvRbN1y7rtN3KHxX3ixZSiEYqUIicLRLREcGrBtpiZEHiDSnafdhxrMybRdJ1gLA\n6JMD/+OvAgMBAAECggEABJsOudY0+U8DwKdtaZWxMR/6SS/jpWeamwcJr6EqVA09\nAirT+OUqyD9BOwaDpp5dKMiStSMDc4PJkl1YZr56a1AN7n0PLeHePtRhguoZeCqP\nP73XXVcxp7rywhjlUZtrrdqpdpg3QEvfu+znqdIdlq4aqaJbzj/26Ux8sAwc7CK0\n5B2TkHiETxwcJoZkbsVBjARx5nwDMYskxTavvCgno/aH5rrzKc3R/MnnV8WuqXD9\n3UAU84HULk+KBRZmZHHfKBQoejTtmtMSlWVmbF83wBCr9ya6BDSveUpEgZKFF4+W\nvWt4F7F9QQnphBiEgJ50djJtNytskS1hbNqten//QQKBgQD91JL3d/dcdNP66fkD\naEz8ghTRpxCardIpDVQ3Ut0mLa/pS0QffDtQJtwP5VofTPCOShzo8GWpAaYXouja\n5PP3sroqEdSVLsZgap2WXq+caQPQyQf2ifhSWM35ZRLiPJq/FMqrZJiLQB+AedZ8\nDy6OGwUSdt6rCYMALSld4jW9QQKBgQC8cGiJ4ek+THc3YmQ1CP4HGwsv9wPLO0PK\nUsjstL5asILySyYQkkp1jB1DFEYxak56hqQDoaXNifj/JhehkJ1Ssq7oPAr8yekK\nlXTr7Yhx6s6AczoWkpmZ/GfnY+AdK9k86rIZRR+xrDNit117P0LEXp9+F8LCCz8v\ni0CzKaM07wKBgQCs1h9QlIaBlSd2dfTSJiYt1iF49Gow+OTegS30Ed92DKv4jgCP\n89araBp2VHR+VbSDHuH6lx6R6wZ+l7Y4vqeE5VUwKj33awc3RcGST10CgttPQmPC\nswW8hK2UAQfPtvaj3/N0qyXXw8zvfYbXqLrJloponTpXej2SVC4TuGFhQQKBgQCM\nbtVplIPn2sKp8titMaNnFj9zIoqgRe2SdbmptlV6brtX6KtYhD2bdq1EFXLuVsRf\nycGntytCj4WSWQgZbxXf0KxLBJxHog3bxmBZhy89fnkg/z6WHfD88j9ZEXSvKMOA\nA4RxErO5DJVLB05SkGWoxL/mD70kMY+IViYEn44y3wKBgQCn9a56Xwbu2rI3j2B6\n830Rtu6+UlxaqjLuPFNytjQ2WGAdlo/cCeQnqCB1hUKxkowPZ2UCS4T2QUXBDj9X\nVoOHX2wPfrMo08QdlZyokfeOEewxpFV2PzWAB4fOR2FtQ5jYgLG9Nkxsv+QfwHeZ\nLUNUsvrUUdYyhahUSsQvTtxqxg==\n-----END PRIVATE KEY-----\n",
+    
+
+
+SELECT CURRENT_ACCOUNT(), CURRENT_REGION();
+
+SELECT CURRENT_USER(),
+       CURRENT_ROLE(),
+       CURRENT_WAREHOUSE(),
+       CURRENT_DATABASE();
+
+CREATE ROLE IF NOT EXISTS KAFKA_CONNECT_ROLE;
+
+GRANT USAGE ON WAREHOUSE COMPUTE_WH
+TO ROLE KAFKA_CONNECT_ROLE;
+
+GRANT USAGE ON DATABASE ECOMMERCE_DW
+TO ROLE KAFKA_CONNECT_ROLE;
+
+GRANT USAGE ON ALL SCHEMAS IN DATABASE ECOMMERCE_DW
+TO ROLE KAFKA_CONNECT_ROLE;
+
+GRANT CREATE TABLE ON SCHEMA ECOMMERCE_DW.RAW_CDC
+TO ROLE KAFKA_CONNECT_ROLE;
+
+CREATE USER IF NOT EXISTS KAFKA_CONNECT
+PASSWORD = 'KafkaConnect123!'
+DEFAULT_ROLE = KAFKA_CONNECT_ROLE
+DEFAULT_WAREHOUSE = COMPUTE_WH
+MUST_CHANGE_PASSWORD = FALSE;
+
+GRANT ROLE KAFKA_CONNECT_ROLE TO USER KAFKA_CONNECT;
+SHOW USERS LIKE 'KAFKA_CONNECT';
+SHOW GRANTS TO ROLE KAFKA_CONNECT_ROLE;
+
+ALTER USER KAFKA_CONNECT
+SET RSA_PUBLIC_KEY='MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuteQlRrUbLSATdWzTg9+gVWOkLTIMA3yUEkBxQcLhenTD2ymWCDo2byR1QP9U8BDDdLBwa3Zk6XY4h3BGoYWT3dIlW5RcRJ7PN7bC5XjrUkyhM7QQGzdXQkH2enhfvfiaR3DMK1WDGFNYNgUtyZ+Gwx+adufbs9MLyCP+IVDn+sSRL1WGP+1PR8GqaCj/J0R6z81+pv+NEBjyJ1Up1KT0ryzYP0RWtIeiTOAZzVrmF6yVPvnrBPP8RLmZOsrYT8kg+Kzwivrn5OsC470Wzdcu67Tdyh8V94sWUohGKlCInC0S0RHBqwbaYmRB4g0p2n3YcazMm0XSdYCwOiTA//jrwIDAQAB';
+
+GRANT CREATE STREAM ON SCHEMA ECOMMERCE_DW.RAW_CDC TO ROLE KAFKA_CONNECT_ROLE;
+GRANT CREATE PROCEDURE ON SCHEMA ECOMMERCE_DW.PUBLIC TO ROLE KAFKA_CONNECT_ROLE;
+GRANT CREATE TABLE ON SCHEMA ECOMMERCE_DW.CURATED TO ROLE KAFKA_CONNECT_ROLE;
+GRANT CREATE TASK ON SCHEMA ECOMMERCE_DW.RAW_CDC TO ROLE KAFKA_CONNECT_ROLE;
+GRANT EXECUTE TASK ON ACCOUNT TO ROLE KAFKA_CONNECT_ROLE;
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.CUSTOMERS_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."customers";
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.INVENTORY_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."inventory";
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.CUSTOMER_EVENTS_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."customer_events";
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.ORDERS_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."orders";
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.PRODUCTS_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."products";
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.ADDRESSES_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."addresses";
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.ORDER_ITEMS_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."order_items";
+
+CREATE OR REPLACE STREAM ECOMMERCE_DW.RAW_CDC.PAYMENTS_STREAM
+ON TABLE ECOMMERCE_DW.RAW_CDC."payments";
+
+
+
+create or replace table ecommerce_dw.curated.customers(
+    customer_id number,
+    email varchar,
+    first_name varchar,
+    last_name varchar,
+    phone varchar,
+    signup_date timestamp_ntz,
+    customer_status varchar
+);
+
+create or replace table ecommerce_dw.curated.inventory(
+    product_id number,
+    available_quantity number,
+    reorder_threshold number,
+    last_updated timestamp_ntz
+);
+
+create or replace table ecommerce_dw.curated.customer_events(
+    event_id number,
+    customer_id number,
+    event_type varchar,
+    product_id number,
+    session_id varchar,
+    event_timestamp timestamp_ntz,
+    device_type varchar,
+    source_channel varchar
+);
+
+create or replace table ecommerce_dw.curated.orders(
+    order_id number,
+    customer_id number,
+    order_timestamp timestamp_ntz,
+    order_status varchar,
+    order_total float
+);
+
+create or replace table ecommerce_dw.curated.products(
+    product_id number,
+    product_name varchar,
+    category varchar,
+    brand varchar,
+    unit_price float,
+    created_at timestamp_ntz
+);
+
+create or replace table ecommerce_dw.curated.addresses(
+    address_id number,
+    customer_id number,
+    address_line1 varchar,
+    city varchar,
+    state varchar,
+    country varchar,
+    postal_code varchar,
+    is_primary boolean,
+    updated_at timestamp_ntz
+);
+
+create or replace table ecommerce_dw.curated.order_items(
+    order_item_id number,
+    order_id number,
+    product_id number,
+    quantity number,
+    unit_price float,
+    line_total float
+);
+
+create or replace table ecommerce_dw.curated.payments(
+    payment_id number,
+    order_id number,
+    payment_method varchar,
+    payment_status varchar,
+    payment_amount float,
+    payment_timestamp timestamp_ntz
+);
+
+
+create or replace procedure public.raw_to_curated(source_stream varchar, target_table varchar, primary_key varchar)
+returns varchar
+language python
+runtime_version = '3.11'
+packages = ('snowflake-snowpark-python', 'requests')
+handler = 'process_data'
+as
+$$
+
+def process_data(session, source_stream, target_table, primary_key):
+    table_def = session.sql(f"desc table {target_table}").collect()
+    inner_merge_query = ""
+    when_matched_query = ""
+    when_not_matched_columns_query = ""
+    when_not_matched_values_query = ""
+    pk = primary_key.lower()
+    
+    for row in table_def:
+        row_name = row["name"].lower()
+        if row["type"] == 'TIMESTAMP_NTZ(9)':
+            inner_merge_query = inner_merge_query + f'TO_TIMESTAMP_NTZ(AFTER:{row_name}::NUMBER/1000000) as {row_name},\n'
+        else:
+            inner_merge_query = inner_merge_query + f'AFTER:{row_name}::{row["type"]} as {row_name},\n'
+
+        when_matched_query = when_matched_query + f'tgt.{row_name} = src.{row_name},\n'
+
+        when_not_matched_columns_query = when_not_matched_columns_query + f'tgt.{row_name},'
+        when_not_matched_values_query = when_not_matched_values_query + f'src.{row_name},'
+
+    delete_sql = f"""
+        DELETE FROM {target_table} tgt
+        USING (
+            SELECT
+                BEFORE:{pk}::NUMBER AS {primary_key}
+            FROM {source_stream}
+            WHERE OP = 'd'
+        ) src
+        WHERE tgt.{primary_key} = src.{primary_key};
+    """
+    merge_sql = f"""
+        MERGE INTO {target_table} tgt
+        USING (
+            SELECT * FROM (
+                SELECT
+                    {inner_merge_query[:-1]}
+                    ROW_NUMBER() OVER(PARTITION BY AFTER:{pk}::NUMBER ORDER BY TS_MS DESC) as rn
+                FROM {source_stream}
+                WHERE OP IN ('c','r','u')
+            ) WHERE rn = 1
+        ) src
+        ON src.{primary_key} = tgt.{primary_key}
+        WHEN MATCHED THEN UPDATE SET
+            {when_matched_query[:-2]}
+        WHEN NOT MATCHED THEN INSERT ({when_not_matched_columns_query[:-1]})
+            VALUES({when_not_matched_values_query[:-1]})
+    """
+
+    has_deletes = session.sql(f"""
+        SELECT COUNT(*)
+        FROM {source_stream}
+        WHERE OP = 'd'
+    """).collect()[0][0]
+
+    if has_deletes:
+        session.sql(delete_sql).collect()
+    
+    session.sql(merge_sql).collect()
+    
+    return f"Processed stream {source_stream}"
+
+$$
+;
+
+
+
+create or replace task ECOMMERCE_DW.RAW_CDC.CUSTOMERS_TASK
+	warehouse=COMPUTE_WH
+	schedule='USING CRON 0,30 * * * * UTC'
+	USER_TASK_TIMEOUT_MS=10800000
+	when system$stream_has_data ('ECOMMERCE_DW.RAW_CDC.CUSTOMERS_STREAM')
+	as call ecommerce_dw.public.raw_to_replica_sp('ECOMMERCE_DW.RAW_CDC.CUSTOMERS_STREAM', 'ECOMMERCE_DW.CURATED.CUSTOMERS', 'candidate_id');
+
+create or replace task ecommerce_dw.raw_cdc.inventory_task
+warehouse = compute_wh
+schedule = 'USING CRON 0,30 * * * * UTC'
+user_task_timeout_ms = 10800000
+when system$stream_has_data ('ECOMMERCE_DW.RAW_CDC.INVENTORY_STREAM')
+as call ecommerce_dw.public.raw_to_curated('ECOMMERCE_DW.RAW_CDC.INVENTORY_STREAM', 'ECOMMERCE_DW.CURATED.INVENTORY', 'product_id');
+
+
+create or replace task ecommerce_dw.raw_cdc.customer_events_task
+warehouse = compute_wh
+user_task_timeout_ms = 10800000
+schedule = 'USING CRON 0,30 * * * * UTC'
+when system$stream_has_data ('ECOMMERCE_DW.RAW_CDC.CUSTOMER_EVENTS_STREAM')
+as call ecommerce_dw.public.raw_to_curated('ECOMMERCE_DW.RAW_CDC.CUSTOMER_EVENTS_STREAM', 'ECOMMERCE_DW.CURATED.CUSTOMER_EVENTS', 'event_id');
+
+drop task ecommerce_dw.raw_cdc.customer_events;
+
+create or replace task ecommerce_dw.raw_cdc.orders_task
+warehouse = compute_wh
+user_task_timeout_ms = 10800000
+schedule = 'USING CRON 0,30 * * * * UTC'
+when system$stream_has_data ('ECOMMERCE_DW.RAW_CDC.ORDERS_STREAM')
+as call ecommerce_dw.public.raw_to_curated('ECOMMERCE_DW.RAW_CDC.ORDERS_STREAM', 'ECOMMERCE_DW.CURATED.ORDERS', 'order_id');
+
+create or replace task ecommerce_dw.raw_cdc.products_task
+warehouse = compute_wh
+user_task_timeout_ms = 10800000
+schedule = 'USING CRON 0,30 * * * * UTC'
+when system$stream_has_data ('ECOMMERCE_DW.RAW_CDC.PRODUCTS_STREAM')
+as call ecommerce_dw.public.raw_to_curated('ECOMMERCE_DW.RAW_CDC.PRODUCTS_STREAM', 'ECOMMERCE_DW.CURATED.PRODUCTS', 'product_id');
+
+
+Force a new snapshot
+--Dropping is not necessary
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.customers";
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.products";
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.orders";
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.order_items";
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.payments";
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.inventory";
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.addresses";
+DROP TABLE IF EXISTS RAW_CDC."ecommerce.public.customer_events";
+
+DROP TABLE IF EXISTS RAW_CDC.CUSTOMERS;
+
+
+curl -X DELETE http://localhost:8083/connectors/ecommerce-postgres
+curl -X DELETE http://localhost:8083/connectors/snowflake-sink
+
+docker exec -it ecommerce-cdc-kafka-1 bash
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.customers
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.products
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.orders
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.order_items
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.payments
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.inventory
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.addresses
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic ecommerce.public.customer_events
+...
+delete these topics as well
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic connect_configs
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic connect_offsets
+kafka-topics.sh --bootstrap-server kafka:9092 --delete --topic connect_statuses
+
+curl -X POST \
+http://localhost:8083/connectors \
+-H "Content-Type: application/json" \
+-d @connector.json
+
+curl -X POST \
+  http://localhost:8083/connectors \
+  -H "Content-Type: application/json" \
+  -d @snowflake-sink-v2.json
+
+curl localhost:8083/connectors
+curl localhost:8083/connectors/ecommerce-postgres/status
+curl localhost:8083/connectors/snowflake-sink/status
+
+Airflow
+echo -e "AIRFLOW_UID=$(id -u)" > .envcat .env
+docker compose -f docker-compose.yaml up airflow-init
+docker compose -f docker-compose.yaml up -d

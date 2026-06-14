@@ -1,0 +1,307 @@
+Answer
+If an interviewer asks:
+Why doesn't Debezium work with wal_level=replica?
+A strong answer is:
+With wal_level=replica, PostgreSQL writes enough information to replicate storage-level page changes to another PostgreSQL instance. Debezium requires row-level logical changes such as inserts, updates, and deletes with table and column information. Those logical changes are only available when wal_level=logical is enabled.
+That's the key distinction:
+
+replica  = storage/page level replication
+
+logical  = row/table level replication
+
+CDC tools like Debezium need the second one.
+
+
+max_replication_slots
+Current:
+
+10
+
+Good.
+A replication slot tracks how far a consumer has read.
+Think:
+
+Postgres WAL
+      |
+Replication Slot
+      |
+Debezium
+
+Example:
+
+WAL records 1-1000
+
+Debezium has processed:
+
+1-750
+
+Replication slot stores:
+
+750
+
+If Debezium restarts:
+
+resume from 751
+
+instead of re-reading everything.
+
+
+
+When you run:
+
+curl localhost:8083
+
+you're talking to:
+
+Your Mac
+   |
+localhost:8083
+   |
+Kafka Connect (Debezium)
+
+The response:
+
+{
+  "version":"3.7.0",
+  ...
+}
+
+comes from the Kafka Connect REST API.
+┌────────────────────┐
+│  Your Mac          │
+│                    │
+│ Postgres :5432     │
+└─────────┬──────────┘
+          |
+          |
+          v
+┌────────────────────┐
+│ Docker Network     │
+│                    │
+│ Zookeeper          │
+│ Kafka              │
+│ Kafka Connect      │
+└────────────────────┘
+
+
+Useful commands:
+List connectors:
+
+curl localhost:8083/connectors
+
+Connector status:
+
+curl localhost:8083/connectors/ecommerce-postgres/status
+
+Create connector:
+
+curl -X POST ...
+
+
+
+Another important interview concept
+You saw:
+
+REPLICA IDENTITY ... DEFAULT
+UPDATE and DELETE events will contain previous values only for PK columns
+
+
+This is a common senior DE interview question.
+With:
+
+REPLICA IDENTITY DEFAULT
+
+Postgres only stores enough information to identify the row.
+For example:
+
+UPDATE customers
+SET email='new@test.com'
+WHERE customer_id=1;
+
+Debezium may emit:
+
+{
+  "before": {
+    "customer_id": 1
+  },
+  "after": {
+    "customer_id": 1,
+    "email": "new@test.com"
+  }
+}
+
+not the full old row.
+If you need the full old row:
+
+ALTER TABLE customers
+REPLICA IDENTITY FULL;
+
+
+
+If you ever want a full re-sync from scratch, the procedure is now:
+1. Stop Connect
+2. Delete:connect_configs
+3. connect_offsets
+4. connect_statuses
+5. Start Connect
+6. Recreate connectors
+That forces:
+
+snapshot.mode=initial
+
+to run again.
+
+
+One thing to keep in mind from now on:
+* connect_configs → stores connector definitions
+* connect_offsets → stores source/sink offsets
+* connect_statuses → stores connector/task status
+
+
+
+Orchestration does not do the work. It coordinates the work.
+Think of a movie director.
+* The director doesn't act.
+* The director doesn't operate the camera.
+* The director doesn't edit the film.
+* The director tells everyone when to do their job and in what order.
+Airflow is that director.
+Without orchestration
+
+CSV File
+    |
+    v
+Python Script 1  ---> Clean Data
+
+Python Script 2  ---> Load Data
+
+Python Script 3  ---> Run SQL
+
+Python Script 4  ---> Send Email
+
+You have to manually run everything in the correct order.
+
+With orchestration
+
+                Airflow
+                    |
+     +--------------+--------------+
+     |              |              |
+     v              v              v
+Extract        Transform        Load
+     |              |              |
+     +--------------+--------------+
+                    |
+                    v
+             Send Notification
+
+Airflow's job is to decide:
+* What runs first?
+* What runs next?
+* What if something fails?
+* Should it retry?
+* Should it wait for another task?
+* Should it send an alert?
+It doesn't necessarily transform data itself.
+
+In your project
+CDC pipeline
+
+Postgres
+     |
+Debezium
+     |
+Kafka
+     |
+Snowflake RAW
+     |
+Snowflake Task
+     |
+Stored Procedure
+     |
+Structured CDC
+
+Here, Snowflake Tasks are the orchestrator.
+The transformation is done by:
+* SQL
+* Python Stored Procedure
+The orchestration is done by:
+* Snowflake Task
+
+Batch pipeline
+
+CSV
+API
+S3
+   |
+   v
+Airflow
+   |
+   +----------------------+
+   |                      |
+   v                      v
+Download CSV         Call API
+   |                      |
+   +----------+-----------+
+              |
+              v
+         PySpark Job
+              |
+              v
+        Cleaned Layer
+
+Here:
+* Airflow orchestrates.
+* PySpark transforms.
+
+dbt is also not an orchestrator
+Suppose you have:
+
+raw_orders
+raw_customers
+
+dbt creates:
+
+stg_orders
+stg_customers
+
+then:
+
+fact_orders
+dim_customers
+
+dbt knows the dependency graph and runs models in order.
+So:
+* dbt = transformation framework
+* Airflow = orchestration framework
+Often they work together:
+
+Airflow
+    |
+    +--> Run ingestion
+    |
+    +--> Run Spark job
+    |
+    +--> Run dbt
+    |
+    +--> Run data quality checks
+    |
+    +--> Send Slack notification
+
+Airflow isn't transforming anything itself—it's coordinating all the components.
+
+For your architecture, I'd keep the responsibilities clean:
+
+Debezium      -> CDC ingestion
+Kafka         -> Streaming transport
+Snowflake     -> Storage
+Snowflake SP  -> CDC transformation
+Snowflake Task-> CDC orchestration
+
+Airflow       -> Batch orchestration
+PySpark       -> Batch transformation
+
+dbt           -> Analytics/business transformations
+
+That's a very clean separation of concerns and mirrors how many real-world data platforms are structured.
+

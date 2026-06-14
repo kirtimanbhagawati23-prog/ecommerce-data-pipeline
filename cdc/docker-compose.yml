@@ -1,0 +1,33 @@
+services:
+
+  zookeeper:
+    image: debezium/zookeeper:2.6
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: debezium/kafka:2.6
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      ZOOKEEPER_CONNECT: zookeeper:2181
+
+  connect:
+    image: debezium-connect-snowflake:2.6
+    depends_on:
+      - kafka
+    ports:
+      - "8083:8083"
+    environment:
+      BOOTSTRAP_SERVERS: kafka:9092
+      GROUP_ID: 1
+
+      CONFIG_STORAGE_TOPIC: connect_configs
+      OFFSET_STORAGE_TOPIC: connect_offsets
+      STATUS_STORAGE_TOPIC: connect_statuses
+
+      CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      STATUS_STORAGE_REPLICATION_FACTOR: 1
