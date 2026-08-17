@@ -2,26 +2,16 @@
   "name": "ecommerce-postgres",
   "config": {
     "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-
     "database.hostname": "host.docker.internal",
-    "database.port": "5432",
-
-    "database.user": "debezium",
-    "database.password": "debezium",
-
-    "database.dbname": "data_engineering",
-
+    "database.port": "",
+    "database.user": "",
+    "database.password": "",
+    "database.dbname": "",
     "topic.prefix": "ecommerce",
-
     "plugin.name": "pgoutput",
-
     "publication.name": "ecommerce_publication",
-
     "slot.name": "ecommerce_slot",
-
     "snapshot.mode": "initial",
-
-    "table.include.list":
-      "public.customers,public.addresses,public.products,public.inventory,public.orders,public.order_items,public.payments,public.customer_events"
+    "table.include.list": "public.customers,public.addresses,public.products,public.inventory,public.orders,public.order_items,public.payments,public.customer_events"
   }
 }
