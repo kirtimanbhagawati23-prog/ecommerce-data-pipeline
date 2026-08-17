@@ -1,0 +1,28 @@
+# Airflow generated logs
+airflow/logs/
+
+# Environment / secrets
+.env
+.env.*
+**/.env
+**/.env.*
+
+# Airflow generated files
+airflow/logs/
+airflow/.airflow/
+
+# Python
+__pycache__/
+*.pyc
+
+# Spark generated output
+**/.crc
+**/output/
+
+# Java dependencies
+*.jar
+
+
+misc.txt
+notes.txt
+recorded_steps.txt

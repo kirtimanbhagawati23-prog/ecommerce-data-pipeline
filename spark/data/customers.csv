@@ -1,0 +1,5 @@
+customer_id,first_name,last_name,email
+1,John,Doe,john@example.com
+2,Jane,Smith,jane@example.com
+3,John,Doe,john@example.com
+4,,Brown,brown@example.com

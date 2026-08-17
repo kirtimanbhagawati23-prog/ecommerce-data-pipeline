@@ -20,6 +20,8 @@ Before building the Docker image, download the following JAR files and place the
 | `bcpkix-fips-2.1.8.jar` | 2.1.8 | Bouncy Castle FIPS PKIX — FIPS-compliant PEM/PKIX support required by the Snowflake connector | [Bouncy Castle](https://downloads.bouncycastle.org/fips-java/bcpkix-fips-2.1.8.jar) |
 
 > The four `bc*` Bouncy Castle JARs are all dependencies of the Snowflake Kafka Connector. The connector uses them for RSA key-pair authentication against Snowflake.
+> use curl.exe -L -O <URL> for Windows and curl -L -O <URL> for Mac to download `bc-fips-2.1.0.jar` and `bcpkix-fips-2.1.8.jar`
+> use 
 
 ## Setup
 
